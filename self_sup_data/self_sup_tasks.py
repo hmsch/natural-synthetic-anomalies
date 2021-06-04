@@ -9,7 +9,7 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
              mode=cv2.NORMAL_CLONE, width_bounds_pct=((0.05,0.2),(0.05,0.2)), min_object_pct=0.25, 
              min_overlap_pct=0.25, shift=True, label_mode='binary', skip_background=None, tol=1, resize=True,
              gamma_params=None, intensity_logistic_params=(1/6, 20),
-             resize_bounds=(0.7, 1.3)):
+             resize_bounds=(0.7, 1.3), verbose=True):
     """
     Create a synthetic training example from the given images by pasting/blending random patches.
     Args:
@@ -65,7 +65,7 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
         if i == 0 or np.random.randint(2) > 0:  # at least one patch
             patchex, ((_coor_min_dim1, _coor_max_dim1), (_coor_min_dim2, _coor_max_dim2)), patch_mask = _patch_ex(
                 patchex, ima_src, dest_object_mask, src_object_mask, mode, label_mode, shift, resize, width_bounds_pct, 
-                gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds)
+                gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds, verbose)
             if patch_mask is not None:
                 mask[_coor_min_dim1:_coor_max_dim1,_coor_min_dim2:_coor_max_dim2] = patch_mask
                 coor_min_dim1 = min(coor_min_dim1, _coor_min_dim1) 
@@ -94,7 +94,7 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
 
 
 def _patch_ex(ima_dest, ima_src, dest_object_mask, src_object_mask, mode, label_mode, shift, resize, width_bounds_pct, 
-              gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds):
+              gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds, verbose):
     skip_background = (src_object_mask is not None) and (dest_object_mask is not None)
     dims = np.array(ima_dest.shape)
     min_width_dim1 = (width_bounds_pct[0][0]*dims[0]).round().astype(int)
@@ -130,7 +130,8 @@ def _patch_ex(ima_dest, ima_src, dest_object_mask, src_object_mask, mode, label_
             found_patch = True
         attempts += 1
         if attempts == 200:
-            print('No suitable patch found.')
+            if verbose:
+                print('No suitable patch found.')
             return ima_dest.copy(), ((0,0),(0,0)), None
 
     src = ima_src[coor_min_dim1:coor_max_dim1, coor_min_dim2:coor_max_dim2]
@@ -173,7 +174,8 @@ def _patch_ex(ima_dest, ima_src, dest_object_mask, src_object_mask, mode, label_
                 found_center = True
             attempts += 1
             if attempts == 200:
-                print('No suitable center found. Dims were:', width, height)
+                if verbose:
+                    print('No suitable center found. Dims were:', width, height)
                 return ima_dest.copy(), ((0,0),(0,0)), None
             
     # blend
