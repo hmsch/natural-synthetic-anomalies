@@ -7,12 +7,11 @@ from skimage.filters import median
 
 def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
              mode=cv2.NORMAL_CLONE, width_bounds_pct=((0.05,0.2),(0.05,0.2)), min_object_pct=0.25, 
-             min_overlap_pct=0.25, shift=True, label_mode='binary', skip_background=None, flood_background_mask=False, 
-             tol=1, resize=True, gamma_params=None, intensity_logistic_params=(1/6, 20),
-             resize_bounds=(0.7, 1.3), label_blur_radius=5, verbose=True):
+             min_overlap_pct=0.25, shift=True, label_mode='binary', skip_background=None, tol=1, resize=True,
+             gamma_params=None, intensity_logistic_params=(1/6, 20),
+             resize_bounds=(0.7, 1.3)):
     """
-    Create as synthetic training example from the given images by pasting/blending a random patch.
-
+    Create a synthetic training example from the given images by pasting/blending random patches.
     Args:
         ima_dest (uint8 numpy array): image with shape (W,H,3) or (W,H,1) where patch should be changed
         ima_src (uint8 numpy array): optional, otherwise use ima_dest as source
@@ -24,9 +23,8 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
         width_bounds_pct ((float, float), (float, float)): min half-width of patch ((min_dim1, max_dim1), (min_dim2, max_dim2))
         shift (bool): if false, patches in src and dest image have same coords. otherwise random shift
         resize (bool): if true, patch is resampled at random size (within bounds and keeping aspect ratio the same) before blending  
-        skip_background (int, int) or [(int, int),]: optional, assume background brightness is first and only interpolate patches
-                    in areas where dest or src patch has pixelwise MAD < second from background brightness.
-        flood_background_mask (bool): whether to flood_fill background from all 4 corners, otherwise median blur object_mask 
+        skip_background (int, int) or [(int, int),]: optional, assume background color is first and only interpolate patches
+                    in areas where dest or src patch has pixelwise MAD < second from background.
         tol (int): mean abs intensity change required to get positive label
         gamma_params (float, float, float): optional, (shape, scale, left offset) of gamma dist to sample half-width of patch from,
                     otherwise use uniform dist between 0.05 and 0.95
@@ -49,26 +47,8 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
         for background, threshold in skip_background:
             src_object_mask &= np.uint8(np.abs(ima_src.mean(axis=-1, keepdims=True) - background) > threshold)
             dest_object_mask &= np.uint8(np.abs(ima_dest.mean(axis=-1, keepdims=True) - background) > threshold)
-        if flood_background_mask:
-            for mask in [src_object_mask, dest_object_mask]:
-                cv2.floodFill(mask, None, (0, 0), 2)
-                if mask[0, -1] != 2:
-                    cv2.floodFill(mask, None, (mask.shape[1] - 1, 0), 2)
-                if mask[-1, 0] != 2:
-                    cv2.floodFill(mask, None, (0, mask.shape[0] - 1), 2)
-                if mask[-1, -1] != 2:
-                    cv2.floodFill(mask, None, (mask.shape[1] - 1, mask.shape[0] - 1), 2)
-                _, labels_im = cv2.connectedComponents(np.uint8(mask < 2))
-                labels, counts = np.unique(labels_im, return_counts=True)
-                max_label_index = np.argmax(counts)
-                if labels_im[0,0] == labels[max_label_index]:  # max count label is background so take second max
-                    counts[max_label_index] = 0
-                    max_label_index = np.argmax(counts)
-                mask *= 0  # remove other components and only keep main object
-                mask[labels_im == labels[max_label_index]] = 1 
-        else:
-            src_object_mask[...,0] = cv2.medianBlur(src_object_mask[...,0], 7)  # remove grain from threshold choice
-            dest_object_mask[...,0] = cv2.medianBlur(dest_object_mask[...,0], 7)  # remove grain from threshold choice
+        src_object_mask[...,0] = cv2.medianBlur(src_object_mask[...,0], 7)  # remove grain from threshold choice
+        dest_object_mask[...,0] = cv2.medianBlur(dest_object_mask[...,0], 7)  # remove grain from threshold choice
     else:
         src_object_mask = None
         dest_object_mask = None
@@ -85,7 +65,7 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
         if i == 0 or np.random.randint(2) > 0:  # at least one patch
             patchex, ((_coor_min_dim1, _coor_max_dim1), (_coor_min_dim2, _coor_max_dim2)), patch_mask = _patch_ex(
                 patchex, ima_src, dest_object_mask, src_object_mask, mode, label_mode, shift, resize, width_bounds_pct, 
-                gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds, verbose)
+                gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds)
             if patch_mask is not None:
                 mask[_coor_min_dim1:_coor_max_dim1,_coor_min_dim2:_coor_max_dim2] = patch_mask
                 coor_min_dim1 = min(coor_min_dim1, _coor_min_dim1) 
@@ -102,7 +82,7 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
     elif label_mode in ['logistic-intensity', 'intensity']:
         k, x0 = intensity_logistic_params
         label = np.mean(np.abs(label_mask * ima_dest * 1.0 - label_mask * patchex * 1.0), axis=-1, keepdims=True)
-        label[...,0] = median(label[...,0], disk(label_blur_radius))
+        label[...,0] = median(label[...,0], disk(5))
         if label_mode == 'logistic-intensity':
             label = label_mask / (1 + np.exp(-k * (label - x0)))
     elif label_mode == 'binary':
@@ -114,7 +94,7 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
 
 
 def _patch_ex(ima_dest, ima_src, dest_object_mask, src_object_mask, mode, label_mode, shift, resize, width_bounds_pct, 
-              gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds, verbose):
+              gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds):
     skip_background = (src_object_mask is not None) and (dest_object_mask is not None)
     dims = np.array(ima_dest.shape)
     min_width_dim1 = (width_bounds_pct[0][0]*dims[0]).round().astype(int)
@@ -150,8 +130,7 @@ def _patch_ex(ima_dest, ima_src, dest_object_mask, src_object_mask, mode, label_
             found_patch = True
         attempts += 1
         if attempts == 200:
-            if verbose:
-                print('No suitable patch found.')
+            print('No suitable patch found.')
             return ima_dest.copy(), ((0,0),(0,0)), None
 
     src = ima_src[coor_min_dim1:coor_max_dim1, coor_min_dim2:coor_max_dim2]
@@ -194,8 +173,7 @@ def _patch_ex(ima_dest, ima_src, dest_object_mask, src_object_mask, mode, label_
                 found_center = True
             attempts += 1
             if attempts == 200:
-                if verbose:
-                    print('No suitable center found. Dims were:', width, height)
+                print('No suitable center found. Dims were:', width, height)
                 return ima_dest.copy(), ((0,0),(0,0)), None
             
     # blend
