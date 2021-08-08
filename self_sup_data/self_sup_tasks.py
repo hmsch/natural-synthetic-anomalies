@@ -9,7 +9,7 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
              mode=cv2.NORMAL_CLONE, width_bounds_pct=((0.05,0.2),(0.05,0.2)), min_object_pct=0.25, 
              min_overlap_pct=0.25, shift=True, label_mode='binary', skip_background=None, tol=1, resize=True,
              gamma_params=None, intensity_logistic_params=(1/6, 20),
-             resize_bounds=(0.7, 1.3), verbose=True):
+             resize_bounds=(0.7, 1.3), num_ellipses=None, verbose=True):
     """
     Create a synthetic training example from the given images by pasting/blending random patches.
     Args:
@@ -29,6 +29,7 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
         gamma_params (float, float, float): optional, (shape, scale, left offset) of gamma dist to sample half-width of patch from,
                     otherwise use uniform dist between 0.05 and 0.95
         intensity_logistic_params (float, float): k, x0 of logitistc map for intensity based label
+        num_ellipses (int): optional, if set, the rectangular patch mask is filled with random ellipses
         label_mode: 'binary', 
                     'continuous' -- use interpolation factor as label (only when mode is 'uniform'),
                     'intensity' -- use median filtered mean absolute pixelwise intensity difference as label,
@@ -65,7 +66,7 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
         if i == 0 or np.random.randint(2) > 0:  # at least one patch
             patchex, ((_coor_min_dim1, _coor_max_dim1), (_coor_min_dim2, _coor_max_dim2)), patch_mask = _patch_ex(
                 patchex, ima_src, dest_object_mask, src_object_mask, mode, label_mode, shift, resize, width_bounds_pct, 
-                gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds, verbose)
+                gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds, num_ellipses, verbose)
             if patch_mask is not None:
                 mask[_coor_min_dim1:_coor_max_dim1,_coor_min_dim2:_coor_max_dim2] = patch_mask
                 coor_min_dim1 = min(coor_min_dim1, _coor_min_dim1) 
@@ -94,7 +95,7 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
 
 
 def _patch_ex(ima_dest, ima_src, dest_object_mask, src_object_mask, mode, label_mode, shift, resize, width_bounds_pct, 
-              gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds, verbose):
+              gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds, num_ellipses, verbose):
     skip_background = (src_object_mask is not None) and (dest_object_mask is not None)
     dims = np.array(ima_dest.shape)
     min_width_dim1 = (width_bounds_pct[0][0]*dims[0]).round().astype(int)
@@ -121,7 +122,25 @@ def _patch_ex(ima_dest, ima_src, dest_object_mask, src_object_mask, mode, label_
         coor_max_dim1 = np.clip(center_dim1 + patch_width_dim1, 0, dims[0])
         coor_max_dim2 = np.clip(center_dim2 + patch_width_dim2, 0, dims[1])
 
-        patch_mask = np.ones((coor_max_dim1 - coor_min_dim1, coor_max_dim2 - coor_min_dim2, 1), dtype=np.uint8) 
+        if num_ellipses is not None:
+            ellipse_min_dim1 = min_width_dim1
+            ellipse_min_dim2 = min_width_dim2
+            ellipse_max_dim1 = max(min_width_dim1 + 1, patch_width_dim1 // 2)
+            ellipse_max_dim2 = max(min_width_dim2 + 1, patch_width_dim2 // 2)
+            patch_mask = np.zeros((coor_max_dim1 - coor_min_dim1, coor_max_dim2 - coor_min_dim2), dtype=np.uint8) 
+            x = np.arange(patch_mask.shape[0]).reshape(-1, 1)
+            y = np.arange(patch_mask.shape[1]).reshape(1, -1)
+            for _ in range(num_ellipses):
+                theta = np.random.uniform(0, np.pi)
+                x0 = np.random.randint(0, patch_mask.shape[0])
+                y0 = np.random.randint(0, patch_mask.shape[1])
+                a = np.random.randint(ellipse_min_dim1, ellipse_max_dim1)
+                b = np.random.randint(ellipse_min_dim2, ellipse_max_dim2)
+                ellipse = (((x-x0)*np.cos(theta) + (y-y0)*np.sin(theta))/a)**2 + (((x-x0)*np.sin(theta) + (y-y0)*np.cos(theta))/b)**2 <= 1  # True for points inside the ellipse
+                patch_mask |= ellipse
+            patch_mask = patch_mask[...,None]
+        else:
+            patch_mask = np.ones((coor_max_dim1 - coor_min_dim1, coor_max_dim2 - coor_min_dim2, 1), dtype=np.uint8) 
 
         if skip_background:
             background_area = np.sum(patch_mask & src_object_mask[coor_min_dim1:coor_max_dim1, coor_min_dim2:coor_max_dim2])
