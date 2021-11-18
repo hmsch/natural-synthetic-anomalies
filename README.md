@@ -2,6 +2,8 @@
 
 **Abstract:** We introduce a new self-supervised task, NSA, for training an end-to-end model for anomaly detection and localization using only normal data. NSA uses Poisson image editing to seamlessly blend scaled patches of various sizes from separate images. This creates a wide range of synthetic anomalies which are more similar to natural sub-image irregularities than previous data-augmentation strategies for self-supervised anomaly detection. We evaluate the proposed method using natural and medical images. Our experiments with the MVTec AD dataset show that a model trained to localize NSA anomalies generalizes well to detecting real-world a priori unknown types of manufacturing defects. Our method achieves an overall detection AUROC of 97.2 outperforming all previous methods that learn from scratch without pre-training datasets.
 
+Please see our arXiv preprint for more details: https://arxiv.org/abs/2109.15222.
+
 ## Data
 The NIH chest X-ray data can be downloaded [here](https://nihcc.app.box.com/v/ChestXray-NIHCC/file/371647823217).
 
@@ -17,5 +19,3 @@ python3 train_mvtec.py -s Shift-Intensity-923874273 -d '/path/to/mvtec_ad/images
 
 ## Evaluation
 The evaluation procedures are defined in `experiments/mvtec_tasks.py` and `experiments/chest_xray_tasks.py`. The evaluation notebooks (`mvtec_evaluation.ipynb` and `chestxray_evaluation.ipynb`) can be used to run the evaluation and generate tables for sample-level and pixel-level AUROC and AU-PRO where applicable.
-
-**Disclaimer:** This is an anonymized draft version that is intended to be used only during review. We will add more documentation and example visualizations for the public version.
