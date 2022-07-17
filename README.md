@@ -1,6 +1,17 @@
-# Self-Supervised Out-of-Distribution Detection and Localization with Natural Synthetic Anomalies (NSA)
+# Natural Synthetic Anomalies for Self-Supervised Anomaly Detection and Localization
 
-**Abstract:** We introduce a new self-supervised task, NSA, for training an end-to-end model for anomaly detection and localization using only normal data. NSA uses Poisson image editing to seamlessly blend scaled patches of various sizes from separate images. This creates a wide range of synthetic anomalies which are more similar to natural sub-image irregularities than previous data-augmentation strategies for self-supervised anomaly detection. We evaluate the proposed method using natural and medical images. Our experiments with the MVTec AD dataset show that a model trained to localize NSA anomalies generalizes well to detecting real-world a priori unknown types of manufacturing defects. Our method achieves an overall detection AUROC of 97.2 outperforming all previous methods that learn from scratch without pre-training datasets.
+**Abstract:** We introduce a simple and intuitive self-supervision task, Natural Synthetic
+Anomalies (NSA), for training an end-to-end model for anomaly detection and
+localization using only normal training data. NSA integrates Poisson image
+editing to seamlessly blend scaled patches of various sizes from separate
+images. This creates a wide range of synthetic anomalies which are more similar
+to natural sub-image irregularities than previous data-augmentation strategies
+for self-supervised anomaly detection. We evaluate the proposed method using
+natural and medical images. Our experiments with the MVTec AD dataset show that
+a model trained to localize NSA anomalies generalizes well to detecting
+real-world a priori unknown types of manufacturing defects. Our method achieves
+an overall detection AUROC of 97.2 outperforming all previous methods that
+learn without the use of additional datasets.
 
 Please see our arXiv preprint for more details: https://arxiv.org/abs/2109.15222.
 
