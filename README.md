@@ -22,11 +22,19 @@ The MVTec AD dataset can be downloaded [here](https://www.mvtec.com/company/rese
 
 ## Training
 The method for generating self-supervised examples is defined in `self_sup_data/self_sup_tasks.py`. This is applied dynamically to the images while loading similar to other data-augmentation transforms (see the corresponding `Dataset` classes).
-To train anomaly detection models for chest X-ray or MVTec AD data use `train_mvtec.py` and `train_chest_xray.py`. E.g.
+To train anomaly detection models for chest X-ray or MVTec AD data use `train_mvtec.py` and `train_chest_xray.py`. 
+
+The training scripts contain dictionaries of settings used for the experiments in the paper and supplement.
+Here are some example commands for training "NSA (logistic)" from the paper:
+
 ```
 python3 train_chest_xray.py -s Shift-Intensity-M -d '/path/to/cxr/images/' -o '/where/to/save/models/' -l 'self_sup_data/chest_xray_lists/norm_MaleAdultPA_train_curated_list.txt'
 python3 train_mvtec.py -s Shift-Intensity-923874273 -d '/path/to/mvtec_ad/images/' -o '/where/to/save/models/' -n zipper
+python3 train_mvtec.py -s Shift-Intensity-M-923874273 -d '/path/to/mvtec_ad/images/' -o '/where/to/save/models/' -n tile
 ```
+
+Note that we use mixed gradients for all chest X-ray data and for MVTec AD texture classes. For
+MVTec AD object classes, we use source gradients due to artefacts of the cloning method (see also appendix A.1 of the paper). 
 
 ## Evaluation
 The evaluation procedures are defined in `experiments/mvtec_tasks.py` and `experiments/chest_xray_tasks.py`. The evaluation notebooks (`mvtec_evaluation.ipynb` and `chestxray_evaluation.ipynb`) can be used to run the evaluation and generate tables for sample-level and pixel-level AUROC and AU-PRO where applicable.
