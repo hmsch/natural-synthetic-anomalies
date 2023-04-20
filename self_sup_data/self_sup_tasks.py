@@ -9,7 +9,7 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
              mode=cv2.NORMAL_CLONE, width_bounds_pct=((0.05,0.2),(0.05,0.2)), min_object_pct=0.25, 
              min_overlap_pct=0.25, shift=True, label_mode='binary', skip_background=None, tol=1, resize=True,
              gamma_params=None, intensity_logistic_params=(1/6, 20),
-             resize_bounds=(0.7, 1.3), num_ellipses=None, verbose=True):
+             resize_bounds=(0.7, 1.3), num_ellipses=None, verbose=True, cutpaste_patch_generation=False):
     """
     Create a synthetic training example from the given images by pasting/blending random patches.
     Args:
@@ -34,13 +34,27 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
                     'continuous' -- use interpolation factor as label (only when mode is 'uniform'),
                     'intensity' -- use median filtered mean absolute pixelwise intensity difference as label,
                     'logistic-intensity' -- use logistic median filtered of mean absolute pixelwise intensity difference as label,
+        cutpaste_patch_generation (bool): optional, if set, width_bounds_pct, resize, skip_background, min_overlap_pct, min_object_pct, 
+                    num_patches and gamma_params are ignored. A single patch is sampled as in the CutPaste paper: 
+                        1. sampling the area ratio between the patch and the full image from (0.02, 0.15)
+                        2. determine the aspect ratio by sampling from (0.3, 1) union (1, 3.3)
+                        3. sample location such that patch is contained entirely within the image
     """
     if mode == 'mix':
         mode = (cv2.NORMAL_CLONE, cv2.MIXED_CLONE)[np.random.randint(2)]
 
+    if cutpaste_patch_generation:
+        width_bounds_pct = None 
+        resize = False 
+        skip_background = None
+        min_overlap_pct = None 
+        min_object_pct = None
+        gamma_params = None
+        num_patches = 1
+
     ima_src = ima_dest.copy() if same or (ima_src is None) else ima_src
 
-    if skip_background is not None:
+    if skip_background is not None and not cutpaste_patch_generation:
         if isinstance(skip_background, tuple):
             skip_background = [skip_background]
         src_object_mask = np.ones_like(ima_src[...,0:1])
@@ -66,7 +80,7 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
         if i == 0 or np.random.randint(2) > 0:  # at least one patch
             patchex, ((_coor_min_dim1, _coor_max_dim1), (_coor_min_dim2, _coor_max_dim2)), patch_mask = _patch_ex(
                 patchex, ima_src, dest_object_mask, src_object_mask, mode, label_mode, shift, resize, width_bounds_pct, 
-                gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds, num_ellipses, verbose)
+                gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds, num_ellipses, verbose, cutpaste_patch_generation)
             if patch_mask is not None:
                 mask[_coor_min_dim1:_coor_max_dim1,_coor_min_dim2:_coor_max_dim2] = patch_mask
                 coor_min_dim1 = min(coor_min_dim1, _coor_min_dim1) 
@@ -95,63 +109,94 @@ def patch_ex(ima_dest, ima_src=None, same=False, num_patches=1,
 
 
 def _patch_ex(ima_dest, ima_src, dest_object_mask, src_object_mask, mode, label_mode, shift, resize, width_bounds_pct, 
-              gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds, num_ellipses, verbose):
-    skip_background = (src_object_mask is not None) and (dest_object_mask is not None)
-    dims = np.array(ima_dest.shape)
-    min_width_dim1 = (width_bounds_pct[0][0]*dims[0]).round().astype(int)
-    max_width_dim1 = (width_bounds_pct[0][1]*dims[0]).round().astype(int)
-    min_width_dim2 = (width_bounds_pct[1][0]*dims[1]).round().astype(int)
-    max_width_dim2 = (width_bounds_pct[1][1]*dims[1]).round().astype(int)
-
-    if gamma_params is not None:
-        shape, scale, lower_bound = gamma_params
-        patch_width_dim1 = int(np.clip((lower_bound + np.random.gamma(shape, scale)) * dims[0], min_width_dim1, max_width_dim1))
-        patch_width_dim2 = int(np.clip((lower_bound + np.random.gamma(shape, scale)) * dims[1], min_width_dim2, max_width_dim2))
-    else:
-        patch_width_dim1 = np.random.randint(min_width_dim1, max_width_dim1)
-        patch_width_dim2 = np.random.randint(min_width_dim2, max_width_dim2)
-
-    found_patch = False
-    attempts = 0
-    while not found_patch:
-        center_dim1 = np.random.randint(min_width_dim1, dims[0]-min_width_dim1)
-        center_dim2 = np.random.randint(min_width_dim2, dims[1]-min_width_dim2)
+              gamma_params, min_object_pct, min_overlap_pct, factor, resize_bounds, num_ellipses, verbose, cutpaste_patch_generation):
+    if cutpaste_patch_generation:
+        skip_background = False
+        dims = np.array(ima_dest.shape)
+        if dims[0] != dims[1]:
+            raise ValueError("CutPaste patch generation only works for square images")
+        # 1. sampling the area ratio between the patch and the full image from (0.02, 0.15)
+        # (divide by 4 as patch-widths below are actually half-widths)
+        area_ratio = np.random.uniform(0.02, 0.15) / 4.0
+        #  2. determine the aspect ratio by sampling from (0.3, 1) union (1, 3.3)
+        if np.random.randint(2) > 0:
+            aspect_ratio = np.random.uniform(0.3, 1)
+        else:
+            aspect_ratio = np.random.uniform(1, 3.3)
+        
+        patch_width_dim1 = int(np.rint(np.clip(np.sqrt(area_ratio * aspect_ratio * dims[0]**2), 0, dims[0])))
+        patch_width_dim2 = int(np.rint(np.clip(area_ratio * dims[0]**2 / patch_width_dim1, 0, dims[1])))
+        #  3. sample location such that patch is contained entirely within the image
+        center_dim1 = np.random.randint(patch_width_dim1, dims[0] - patch_width_dim1)
+        center_dim2 = np.random.randint(patch_width_dim2, dims[1] - patch_width_dim2)
 
         coor_min_dim1 = np.clip(center_dim1 - patch_width_dim1, 0, dims[0])
         coor_min_dim2 = np.clip(center_dim2 - patch_width_dim2, 0, dims[1])
         coor_max_dim1 = np.clip(center_dim1 + patch_width_dim1, 0, dims[0])
         coor_max_dim2 = np.clip(center_dim2 + patch_width_dim2, 0, dims[1])
 
-        if num_ellipses is not None:
-            ellipse_min_dim1 = min_width_dim1
-            ellipse_min_dim2 = min_width_dim2
-            ellipse_max_dim1 = max(min_width_dim1 + 1, patch_width_dim1 // 2)
-            ellipse_max_dim2 = max(min_width_dim2 + 1, patch_width_dim2 // 2)
-            patch_mask = np.zeros((coor_max_dim1 - coor_min_dim1, coor_max_dim2 - coor_min_dim2), dtype=np.uint8) 
-            x = np.arange(patch_mask.shape[0]).reshape(-1, 1)
-            y = np.arange(patch_mask.shape[1]).reshape(1, -1)
-            for _ in range(num_ellipses):
-                theta = np.random.uniform(0, np.pi)
-                x0 = np.random.randint(0, patch_mask.shape[0])
-                y0 = np.random.randint(0, patch_mask.shape[1])
-                a = np.random.randint(ellipse_min_dim1, ellipse_max_dim1)
-                b = np.random.randint(ellipse_min_dim2, ellipse_max_dim2)
-                ellipse = (((x-x0)*np.cos(theta) + (y-y0)*np.sin(theta))/a)**2 + (((x-x0)*np.sin(theta) + (y-y0)*np.cos(theta))/b)**2 <= 1  # True for points inside the ellipse
-                patch_mask |= ellipse
-            patch_mask = patch_mask[...,None]
-        else:
-            patch_mask = np.ones((coor_max_dim1 - coor_min_dim1, coor_max_dim2 - coor_min_dim2, 1), dtype=np.uint8) 
+        patch_mask = np.ones((coor_max_dim1 - coor_min_dim1, coor_max_dim2 - coor_min_dim2, 1), dtype=np.uint8)
+    else:
+        skip_background = (src_object_mask is not None) and (dest_object_mask is not None)
+        dims = np.array(ima_dest.shape)
+        min_width_dim1 = (width_bounds_pct[0][0]*dims[0]).round().astype(int)
+        max_width_dim1 = (width_bounds_pct[0][1]*dims[0]).round().astype(int)
+        min_width_dim2 = (width_bounds_pct[1][0]*dims[1]).round().astype(int)
+        max_width_dim2 = (width_bounds_pct[1][1]*dims[1]).round().astype(int)
 
-        if skip_background:
-            background_area = np.sum(patch_mask & src_object_mask[coor_min_dim1:coor_max_dim1, coor_min_dim2:coor_max_dim2])
-            found_patch = (background_area / (patch_mask.shape[0] * patch_mask.shape[1]) > min_object_pct) 
+        if gamma_params is not None:
+            shape, scale, lower_bound = gamma_params
+            patch_width_dim1 = int(np.clip((lower_bound + np.random.gamma(shape, scale)) * dims[0], min_width_dim1, max_width_dim1))
+            patch_width_dim2 = int(np.clip((lower_bound + np.random.gamma(shape, scale)) * dims[1], min_width_dim2, max_width_dim2))
         else:
-            found_patch = True
-        attempts += 1
-        if attempts == 200:
-            if verbose:
-                print('No suitable patch found.')
-            return ima_dest.copy(), ((0,0),(0,0)), None
+            patch_width_dim1 = np.random.randint(min_width_dim1, max_width_dim1)
+            patch_width_dim2 = np.random.randint(min_width_dim2, max_width_dim2)
+
+        found_patch = False
+        attempts = 0
+        while not found_patch:
+            center_dim1 = np.random.randint(min_width_dim1, dims[0]-min_width_dim1)
+            center_dim2 = np.random.randint(min_width_dim2, dims[1]-min_width_dim2)
+
+            coor_min_dim1 = np.clip(center_dim1 - patch_width_dim1, 0, dims[0])
+            coor_min_dim2 = np.clip(center_dim2 - patch_width_dim2, 0, dims[1])
+            coor_max_dim1 = np.clip(center_dim1 + patch_width_dim1, 0, dims[0])
+            coor_max_dim2 = np.clip(center_dim2 + patch_width_dim2, 0, dims[1])
+
+            if num_ellipses is not None:
+                ellipse_min_dim1 = min_width_dim1
+                ellipse_min_dim2 = min_width_dim2
+                ellipse_max_dim1 = max(min_width_dim1 + 1, patch_width_dim1 // 2)
+                ellipse_max_dim2 = max(min_width_dim2 + 1, patch_width_dim2 // 2)
+                patch_mask = np.zeros((coor_max_dim1 - coor_min_dim1, coor_max_dim2 - coor_min_dim2), dtype=np.uint8) 
+                x = np.arange(patch_mask.shape[0]).reshape(-1, 1)
+                y = np.arange(patch_mask.shape[1]).reshape(1, -1)
+                for _ in range(num_ellipses):
+                    theta = np.random.uniform(0, np.pi)
+                    x0 = np.random.randint(0, patch_mask.shape[0])
+                    y0 = np.random.randint(0, patch_mask.shape[1])
+                    a = np.random.randint(ellipse_min_dim1, ellipse_max_dim1)
+                    b = np.random.randint(ellipse_min_dim2, ellipse_max_dim2)
+                    ellipse = (((x-x0)*np.cos(theta) + (y-y0)*np.sin(theta))/a)**2 + (((x-x0)*np.sin(theta) + (y-y0)*np.cos(theta))/b)**2 <= 1  # True for points inside the ellipse
+                    patch_mask |= ellipse
+                patch_mask = patch_mask[...,None]
+            else:
+                patch_mask = np.ones((coor_max_dim1 - coor_min_dim1, coor_max_dim2 - coor_min_dim2, 1), dtype=np.uint8) 
+
+            if skip_background:
+                background_area = np.sum(patch_mask & src_object_mask[coor_min_dim1:coor_max_dim1, coor_min_dim2:coor_max_dim2])
+                if num_ellipses is not None:
+                    patch_area = np.sum(patch_mask)
+                else:
+                    patch_area = patch_mask.shape[0] * patch_mask.shape[1]
+                found_patch = (background_area / patch_area > min_object_pct) 
+            else:
+                found_patch = True
+            attempts += 1
+            if attempts == 200:
+                if verbose:
+                    print('No suitable patch found.')
+                return ima_dest.copy(), ((0,0),(0,0)), None
 
     src = ima_src[coor_min_dim1:coor_max_dim1, coor_min_dim2:coor_max_dim2]
     height, width, _ = src.shape

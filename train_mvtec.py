@@ -340,6 +340,56 @@ SETTINGS = {
         'self_sup_args' : {'gamma_params':(2, 0.05, 0.03), 'resize':False, 
                            'shift':True, 'same':True, 'mode':'swap', 'label_mode':'binary'}
     },
+
+    'Shift-Intensity-Swap' : {
+        'fname': 'shift_intensity_swap.pt',
+        'out_dir': 'swap/',
+        'loss': nn.BCELoss,
+        'skip_background': True, 
+        'final_activation': 'sigmoid',
+        'self_sup_args' : {'gamma_params':(2, 0.05, 0.03), 'resize':True, 
+                           'shift':True, 'same':False, 'mode':'swap', 'label_mode':'logistic-intensity'}
+    },
+    'Shift-Intensity-Swap-923874273' : {
+        'fname': 'shift_intensity_swap_923874273.pt',
+        'out_dir': 'swap/',
+        'loss': nn.BCELoss,
+        'skip_background': True, 
+        'final_activation': 'sigmoid',
+        'seed': 923874273,
+        'self_sup_args' : {'gamma_params':(2, 0.05, 0.03), 'resize':True, 
+                           'shift':True, 'same':False, 'mode':'swap', 'label_mode':'logistic-intensity'}
+    },
+    'Shift-Intensity-Swap-2388222932' : {
+        'fname': 'shift_intensity_swap_2388222932.pt',
+        'out_dir': 'swap/',
+        'loss': nn.BCELoss,
+        'skip_background': True, 
+        'final_activation': 'sigmoid',
+        'seed': 2388222932,
+        'self_sup_args' : {'gamma_params':(2, 0.05, 0.03), 'resize':True, 
+                           'shift':True, 'same':False, 'mode':'swap', 'label_mode':'logistic-intensity'}
+    },
+    'Shift-Intensity-Swap-676346783' : {
+        'fname': 'shift_intensity_swap_676346783.pt',
+        'out_dir': 'swap/',
+        'loss': nn.BCELoss,
+        'skip_background': True, 
+        'final_activation': 'sigmoid',
+        'seed': 676346783,
+        'self_sup_args' : {'gamma_params':(2, 0.05, 0.03), 'resize':True, 
+                           'shift':True, 'same':False, 'mode':'swap', 'label_mode':'logistic-intensity'}
+    },
+    'Shift-Intensity-Swap-123425' : {
+        'fname': 'shift_intensity_swap_123425.pt',
+        'out_dir': 'swap/',
+        'loss': nn.BCELoss,
+        'skip_background': True, 
+        'final_activation': 'sigmoid',
+        'seed': 123425,
+        'self_sup_args' : {'gamma_params':(2, 0.05, 0.03), 'resize':True, 
+                           'shift':True, 'same':False, 'mode':'swap', 'label_mode':'logistic-intensity'}
+    },
 }
 
 # note: these are half-widths in [0, 0.5]
@@ -391,7 +441,7 @@ def set_seed(seed_value):
     torch.cuda.manual_seed_all(seed_value)
 
 
-def train(class_name, data_dir, out_dir, setting, device, pool, preact,
+def train(class_name, data_dir, out_dir, setting, device, pool, preact, ellipse, use_mask = True, single_patch = False, cutpaste_patch_gen = False,
          min_lr = 1e-6, max_lr = 1e-3, batch_size = 64, seed = 1982342):
     set_seed(setting.get('seed', seed))
     num_epochs = EPOCHS.get(class_name)
@@ -419,15 +469,26 @@ def train(class_name, data_dir, out_dir, setting, device, pool, preact,
                                     low_res=res, download=False, transform=train_transform)
 
     train_dat.configure_self_sup(self_sup_args=setting.get('self_sup_args'))
-    if setting.get('skip_background', False):
+    if setting.get('skip_background', False) and use_mask:
         train_dat.configure_self_sup(self_sup_args={'skip_background': BACKGROUND.get(class_name)})
     if class_name in TEXTURES:
         train_dat.configure_self_sup(self_sup_args={'resize_bounds': (.5, 2)})
     train_dat.configure_self_sup(on=True, self_sup_args={'width_bounds_pct': WIDTH_BOUNDS_PCT.get(class_name),
                                                          'intensity_logistic_params': INTENSITY_LOGISTIC_PARAMS.get(class_name),
-                                                         'num_patches': NUM_PATCHES.get(class_name),
+                                                         'num_patches': 1 if single_patch else NUM_PATCHES.get(class_name),
                                                          'min_object_pct': MIN_OBJECT_PCT.get(class_name),
                                                          'min_overlap_pct': MIN_OVERLAP_PCT.get(class_name)})
+    if ellipse:
+        num_epochs += 240
+        train_dat.configure_self_sup(self_sup_args={'num_ellipses': 5})
+        # if MIN_OBJECT_PCT.get(class_name) is not None:
+        #    train_dat.configure_self_sup(self_sup_args={'min_object_pct': MIN_OBJECT_PCT.get(class_name) / 2})
+        #if setting.get('self_sup_args').get('gamma_params') is not None:
+        #    shape, scale, lower_bound = setting.get('self_sup_args').get('gamma_params')
+        #    train_dat.configure_self_sup(self_sup_args={'gamma_params': (2*shape, scale, lower_bound)})
+
+    if cutpaste_patch_gen:
+        train_dat.configure_self_sup(self_sup_args={'cutpaste_patch_generation': True})
     
     loader_train = DataLoader(train_dat, batch_size, shuffle=True, num_workers=os.cpu_count(),
                               worker_init_fn=lambda _: np.random.seed(torch.utils.data.get_worker_info().seed % 2**32))
@@ -442,7 +503,7 @@ def train(class_name, data_dir, out_dir, setting, device, pool, preact,
     out_dir = os.path.join(out_dir, setting.get('out_dir'), class_name)
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
-
+    
     train_and_save_model(model, optimizer, loss_func, loader_train, class_name + '_'+ setting.get('fname'), out_dir, 
                          num_epochs=num_epochs, save_freq=80, device=device, scheduler=scheduler, save_intermediate_model=False)
 
@@ -454,8 +515,12 @@ if __name__ == "__main__":
     parser.add_argument("-s", "--setting", required=True, type=str)
     parser.add_argument("-c", "--categories", required=False, type=str, default='all')
     parser.add_argument("-n", "--class_name", required=False, type=str, default=None)
+    parser.add_argument("--single_patch", required=False, action='store_true')
+    parser.add_argument("--cutpaste_patch_gen", required=False, action='store_true')
+    parser.add_argument("--no_mask", required=False, action='store_true')
     parser.add_argument("--no_pool", required=False, action='store_true')
     parser.add_argument("--preact", required=False, action='store_true')
+    parser.add_argument("--ellipse", required=False, action='store_true')
     args = parser.parse_args()
 
     out_dir = args.out_dir
@@ -479,5 +544,5 @@ if __name__ == "__main__":
         categories = CLASS_NAMES
 
     for class_name in tqdm(categories):
-        train(class_name, data_dir, out_dir, setting, device, not args.no_pool, args.preact)
+        train(class_name, data_dir, out_dir, setting, device, not args.no_pool, args.preact, args.ellipse, not args.no_mask, args.single_patch, args.cutpaste_patch_gen)
 
